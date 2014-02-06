@@ -6,7 +6,7 @@ import numpy
 import matplotlib.pyplot as plt
 import HelperFunctions
 
-left_trim = 1
+left_trim = 5
 right_trim = 0
 bad_regions = {}
 

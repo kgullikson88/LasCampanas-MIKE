@@ -11,7 +11,7 @@ import Units
 import DataStructures
 import Correlate
 import MakeModel
-import RotBroad
+import RotBroad_Fast as RotBroad
 import time
 import FittingUtilities
 import HelperFunctions
@@ -71,16 +71,10 @@ def GetModel(data, model, vel=0.0, vsini=15*Units.cm/Units.km, resolution=20000)
 
     #Scale using Beer's Law
     line_indices = numpy.where(model2.y / model2.cont < 0.96)[0]
-    #w line_indices = numpy.where(order.y / order.cont < 0.90)[0]
     if len(line_indices) > 0:
-      #scale_fcn = numpy.poly1d(numpy.polyfit(model2.x[line_indices], numpy.log(order.y[line_indices]/order.cont[line_indices]) / numpy.log(model2.y[line_indices] / model2.cont[line_indices]), 2))
       scale = numpy.median(numpy.log(order.y[line_indices]/order.cont[line_indices]) / numpy.log(model2.y[line_indices] / model2.cont[line_indices]) )
-      #pylab.plot(model2.x[line_indices], numpy.log(order.y[line_indices]/order.cont[line_indices]) / numpy.log(model2.y[line_indices] / model2.cont[line_indices]))
-      #pylab.plot(model2.x[line_indices], scale_fcn(model2.x[line_indices]))
       model2.y = model2.y**scale
       model2.cont = model2.cont**scale
-      #model2.y = model2.y**scale_fcn(model2.x)
-      #model2.cont = model2.cont**scale_fcn(model2.x)
     
     print "Order %i: Scale = %g" %(i, scale)
 
@@ -144,9 +138,20 @@ if __name__ == "__main__":
   logg = numpy.log10(Units.G*p_mass*Units.Msun/(radius*Units.Rsun)**2)
 
   #Find the best fit temperature
-  temperature = modelfiles.keys()[numpy.argmin((modelfiles.keys() - p_temp)**2)]
-  print p_temp, temperature
+  Ts = sorted(modelfiles.keys())
+  bestidx = numpy.argmin((numpy.array(Ts) - p_temp)**2)
+  filenames = []
+  for i in (bestidx-1, bestidx, bestidx+1):
+    if i < 0 or i > len(Ts):
+      continue
+    for fname in modelfiles[Ts[i]]:
+      filenames.append(fname)
+  #temperature = modelfiles.keys()[numpy.argmin((modelfiles.keys() - p_temp)**2)]
+  #print p_temp, temperature
 
+  #filenames = modelfiles[temperature]
+  
+  """
   #Find the best logg
   best_logg = 9e9
   indices = []
@@ -161,6 +166,7 @@ if __name__ == "__main__":
   filenames = []
   for i in indices:
     filenames.append(modelfiles[temperature][i])
+  """
 
   chisquareds = []
   models = []
@@ -185,7 +191,9 @@ if __name__ == "__main__":
 
   best_index = numpy.argmin(chisquareds)
   orders = models[best_index]
-  print chisquareds
+  for x2, fname in zip(chisquareds, filenames):
+    print fname.split("/")[-1], "\t", x2
+
   
   if "-" in datafile:
     idx = int(datafile.split("-")[1].split(".fits")[0])
@@ -198,15 +206,24 @@ if __name__ == "__main__":
   orders = orders[::-1]
 
   column_list = []
+  Modeler = MakeModel.Modeler()
   for i, original in enumerate(orders_original[2:-1]):
+    #Make a telluric model for this order
+    lowfreq, highfreq = 1e7/original.x[-1], 1e7/original.x[0]
+    telluric = Modeler.MakeModel(h2o=50.0, lowfreq=lowfreq, highfreq=highfreq)
+    telluric = FittingUtilities.ReduceResolution(telluric, 20000)
+    telluric = FittingUtilities.RebinData(telluric, original.x)
+    
     #original = orders_original[i+2]
     original.cont = FittingUtilities.Continuum(original.x, original.y, lowreject=2, highreject=2)
     model = orders[i+2]
     pylab.figure(1)
     pylab.plot(original.x, original.y/original.cont, 'k-')
     pylab.plot(model.x, model.y/model.cont, 'r-')
+    pylab.plot(telluric.x, telluric.y, 'g-')
     pylab.figure(2)
     pylab.plot(original.x, original.y/(original.cont * model.y/model.cont), 'k-')
+    pylab.plot(telluric.x, telluric.y, 'g-')
     original.y /= model.y/model.cont
     
     columns = {"wavelength": original.x,
