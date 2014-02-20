@@ -12,10 +12,38 @@ import HelperFunctions
 import FittingUtilities
 
 badregions = [[587, 590],
+              [720, 720.3],
+              [720.5, 721],
+              [721.5, 721.6],
+              [722.2, 722.4],
+              [724.3, 724.5],
+              [725, 725.4],
+              [726, 726.22],
+              [732.4, 732.8],
+              [734.2, 737],
               [758,756.8],
               [806,810.7],
               [811.5,811.8],
               [817.56, 820.6]]
+              
+              
+              
+namedict = {"pressure": ["PRESFIT", "PRESVAL", "Pressure"],
+                  "temperature": ["TEMPFIT", "TEMPVAL", "Temperature"],
+                  "angle": ["ZD_FIT", "ZD_VAL", "Zenith Distance"],
+                  "resolution": ["RESFIT", "RESVAL", "Detector Resolution"],
+                  "h2o": ["H2OFIT", "H2OVAL", "H2O abundance"],
+                  "co2": ["CO2FIT", "CO2VAL", "CO2 abundance"],
+                  "o3": ["O3FIT", "O3VAL", "O3 abundance"],
+                  "n2o": ["N2OFIT", "N2OVAL", "N2O abundance"],
+                  "co": ["COFIT", "COVAL", "CO abundance"],
+                  "ch4": ["CH4FIT", "CH4VAL", "CH4 abundance"],
+                  "o2": ["O2FIT", "O2VAL", "O2 abundance"],
+                  "no": ["NOFIT", "NOVAL", "NO abundance"],
+                  "so2": ["SO2FIT", "SO2VAL", "SO2 abundance"],
+                  "no2": ["NO2FIT", "NO2VAL", "NO2 abundance"],
+                  "nh3": ["NH3FIT", "NH3VAL", "NH3 abundance"],
+                  "hno3": ["HNO3FIT", "HNO3VAL", "HNO3 abundance"]}              
               
               
 
@@ -81,7 +109,7 @@ if __name__ == "__main__":
     temperature = header['TEMPOUTS']+273.15
     pressure = 764.5
     humidity = 40.0
-    resolution = 20000.0
+    resolution = 40000.0
     angle = numpy.arccos(1.0/header["AIRMASS"])*180.0/numpy.pi
 
   
@@ -117,6 +145,7 @@ if __name__ == "__main__":
       pressure = Pres[idx]
       humidity = humidity[idx]
       
+      
 
       
     #Adjust fitter values
@@ -128,10 +157,133 @@ if __name__ == "__main__":
                         "resolution": resolution})
     fitter.SetBounds({"h2o": [1.0, 99.9],
                       "o2": [5e4, 1e6],
-                      "temperature": [temperature-5, temperature+5],
-                      "resolution": [resolution/2.0, resolution*2.0]})
+                      "temperature": [temperature-50, temperature+50],
+                      "resolution": [40000, 80000]})
     fitter.IgnoreRegions(badregions)
     models = []
+    
+    # Fit orders 22 and 23 to get the appropriate parameters.
+    h2o = []
+    o2 = []
+    temperature = []
+    resolution = []
+    waveshifts = []
+    wave0 = []
+    chisquared = []
+    start = 28
+    for i, order in enumerate(orders[start:start+1]):
+      print "\n***************************\nFitting order %i: " %(i+start)
+      
+      fitter.AdjustValue({"wavestart": order.x[0] - 10.0,
+                          "waveend": order.x[-1] + 10.0})
+      order.cont = FittingUtilities.Continuum(order.x, order.y, fitorder=3, lowreject=2, highreject=10)
+      fitter.ImportData(order)
+      logfile.write("Fitting order %i with guassian line profiles\n" %(i+start)) 
+      model, R = fitter.Fit(resolution_fit_mode="gauss", fit_primary=False, adjust_wave="model", continuum_fit_order=3, return_resolution=True)
+     
+      fitmodel = model.copy()
+      
+      # Save fitted parameters
+      resolution.append(R)
+      waveshifts.append(fitter.shift)
+      wave0.append(fitter.data.x.mean())
+      idx = numpy.where(numpy.array(fitter.parnames) == "h2o")[0]
+      h2o.append(fitter.const_pars[idx])
+      idx = numpy.where(numpy.array(fitter.parnames) == "o2")[0]
+      o2.append(fitter.const_pars[idx])
+      idx = numpy.where(numpy.array(fitter.parnames) == "temperature")[0]
+      temperature.append(fitter.const_pars[idx])
+      chisquared.append(1.0/fitter.chisq_vals[-1])
+      
+      
+    # Take the average parameter values
+    logfile.write("O2, H2O, T, R: \n")
+    for x1, x2, x3, x4 in zip(o2, h2o, temperature, resolution):
+      logfile.write("%g\t%g\t%g\t%g\n" %(x1, x2, x3, x4)  )
+    print o2
+    print h2o
+    print temperature
+    print resolution, '\n\n'
+    chi2 = numpy.array(chisquared)
+    o2 = numpy.array(o2)
+    h2o = numpy.array(h2o)
+    temperature = numpy.array(temperature)
+    resolution = numpy.array(resolution)
+    o2 = numpy.sum(o2*chi2)/numpy.sum(chi2)
+    h2o = numpy.sum(h2o*chi2)/numpy.sum(chi2)
+    temperature = numpy.sum(temperature*chi2)/numpy.sum(chi2)
+    resolution = numpy.sum(resolution*chi2)/numpy.sum(chi2)
+    
+    # The waveshift difference is actually an error in the vacuum-->air correction
+    # It looks like a velocity shift
+    print waveshifts
+    print wave0
+    velshifts = 3e5*numpy.array(waveshifts)/numpy.array(wave0)
+    print velshifts
+    vel = numpy.sum(velshifts*chi2)/numpy.sum(chi2)
+    #logfile.write("vshift = %g and %g" %(velshifts[0], velshifts[1]))
+    logfile.write("vshift = %g\n" %vel)
+    print "velocity shift: ", vel
+    
+    #Now, apply these values to all orders
+    fitter.shift = 0.0
+    for i, order in enumerate(orders):
+      if i == start:
+	model = fitmodel
+      else:
+        fitter.AdjustValue({"wavestart": order.x[0] - 20.0,
+                            "waveend": order.x[-1] + 20.0,
+                            "o2": o2,
+                            "h2o": h2o,
+                            "temperature": temperature,
+                            "resolution": resolution})
+        fitpars = [fitter.const_pars[j] for j in range(len(fitter.parnames)) if fitter.fitting[j] ]
+      
+        order.cont = FittingUtilities.Continuum(order.x, order.y, fitorder=3, lowreject=2, highreject=10)
+      
+        fitter.ImportData(order)
+        fitter.resolution_fit_mode = "gauss"
+        model = fitter.GenerateModel(fitpars, nofit=True)
+        model.x /= (1.0 + vel/3e5)
+        model = FittingUtilities.RebinData(model, order.x)
+      
+      data = order.copy()
+      primary = DataStructures.xypoint(x=order.x, y=numpy.ones(order.x.size))
+      
+      # Output
+      #Set up data structures for OutputFitsFile
+      columns = {"wavelength": data.x,
+                 "flux": data.y,
+                 "continuum": data.cont,
+                 "error": data.err,
+                 "model": model.y,
+                 "primary": primary.y}
+      
+      header_info = []
+      numpars = len(fitter.const_pars)
+      for j in range(numpars):
+        try:
+          parname = fitter.parnames[j]
+          parval = fitter.const_pars[j]
+          fitting = fitter.fitting[j]
+          header_info.append([namedict[parname][0], fitting, namedict[parname][2] ])
+          header_info.append([namedict[parname][1], parval, namedict[parname][2] ])
+        except KeyError:
+          print "Not saving the following info: %s" %(fitter.parnames[j])
+      
+      
+      if (i == 0 and makenew) or not exists:
+        HelperFunctions.OutputFitsFileExtensions(columns, fname, outfilename, headers_info=[header_info,], mode="new")
+        exists = True
+      else:
+        HelperFunctions.OutputFitsFileExtensions(columns, outfilename, outfilename, headers_info=[header_info,], mode="append")
+     
+      
+      
+    
+    """
+    
+    Old method!
     
     #Make a test model, to determine whether/how to fit each value
     fitter.AdjustValue({"wavestart": orders[start].x[0]-20,
@@ -224,5 +376,5 @@ if __name__ == "__main__":
         exists = True
       else:
         HelperFunctions.OutputFitsFileExtensions(columns, outfilename, outfilename, headers_info=[header_info,], mode="append")
-
+    """
   logfile.close()

@@ -65,41 +65,37 @@ def GetModel(data, model, vel=0.0, vsini=15*Units.cm/Units.km, resolution=20000)
     fit = numpy.poly1d(numpy.polyfit(offsets, ycorr, 3))
     ycorr = ycorr - fit(offsets)
     maxindex = ycorr.argmax()
-    model2 = DataStructures.xypoint(x=order.x, y=model_fcn(order.x*(1.+vel/Units.c)+offsets[maxindex]))
+    if i == 28:
+      print "Offset = %g nm" %offsets[maxindex]
+    if abs(offsets[maxindex]) < 0.5e-9:
+      model2 = DataStructures.xypoint(x=order.x, y=model_fcn(order.x*(1.+vel/Units.c)+offsets[maxindex]))
     model2.cont = FittingUtilities.Continuum(model2.x, model2.y, lowreject=1, fitorder=3)
     model2 = FittingUtilities.ReduceResolution(model2.copy(), resolution)
 
     #Scale using Beer's Law
-    line_indices = numpy.where(model2.y / model2.cont < 0.96)[0]
-    if len(line_indices) > 0:
-      scale = numpy.median(numpy.log(order.y[line_indices]/order.cont[line_indices]) / numpy.log(model2.y[line_indices] / model2.cont[line_indices]) )
-      model2.y = model2.y**scale
-      model2.cont = model2.cont**scale
+    #line_indices = numpy.where(model2.y / model2.cont < 0.96)[0]
+    #if len(line_indices) > 0:
+    #  scale = numpy.median(numpy.log(order.y[line_indices]/order.cont[line_indices]) / numpy.log(model2.y[line_indices] / model2.cont[line_indices]) )
+    #  model2.y = model2.y**scale
+    #  model2.cont = model2.cont**scale
     
-    print "Order %i: Scale = %g" %(i, scale)
+    #print "Order %i: Scale = %g" %(i, scale)
 
     output_orders.append(model2.copy())
 
-  pylab.show()
+  #pylab.show()
   return output_orders
 
 
 
 
-if __name__ == "__main__":
-  import os
-  import sys
-  home = os.environ["HOME"]
-  try:
-    datafile = sys.argv[1]
-    print "Removing primary star from  ", datafile
-  except IndexError:
-    print "Error! Must give .fits file!"
-    sys.exit()
+#if __name__ == "__main__":
+def main1(datafile, p_spt="A0", vsini=15.0, vel=0.0, metal=0.0): 
   
   modeldir = os.environ["HOME"] + "/School/Research/Models/Sorted/Stellar/Vband/"
   files = os.listdir(modeldir)
   modelfiles = defaultdict(list)
+  Modeler = MakeModel.Modeler()
   for fname in files:
     try:
       temperature = float(fname.split("lte")[-1].split("-")[0])*100
@@ -108,28 +104,26 @@ if __name__ == "__main__":
         temperature = float(fname.split("lte")[-1].split("+")[0])*100
       except ValueError:
         print "Skipping file %s" %fname
+        continue
     modelfiles[temperature].append(modeldir+fname)
 
   #Read in data
-  orders_original = tuple(HelperFunctions.ReadFits(datafile, extensions=True, x="wavelength", y="flux", errors="error"))
-  orders_original = orders_original[::-1]
+  orders_original = list(HelperFunctions.ReadFits(datafile, extensions=True, x="wavelength", y="flux", errors="error"))
 
-  #Check for command line arguments
-  p_spt = "A0"
-  vsini = 15.0
-  vel = 0.0
-  metal = 0.0
-  if len(sys.argv) > 2:
-    for arg in sys.argv[2:]:
-      if "primary" in arg:
-        p_spt = arg.split("=")[-1]
-      elif "vsini" in arg:
-        vsini = float(arg.split("=")[-1])
-      elif "vel" in arg:
-        vel = float(arg.split("=")[-1])
-      elif "metal" in arg:
-        metal = float(arg.split("=")[-1])
-        
+  #Do a rough telluric correction in the data
+  tellurics = []
+  for i, order in enumerate(orders_original):
+    lowfreq = 1e7/(order.x[-1] + 10)
+    highfreq = 1e7/(order.x[0] - 10)
+    model = Modeler.MakeModel(humidity=20.0, lowfreq=lowfreq, highfreq=highfreq)
+    model = FittingUtilities.ReduceResolution(model, 40000)
+    model = FittingUtilities.RebinData(model, order.x)
+    order.y /= model.y
+    tellurics.append(model)
+    orders_original[i] = order.copy()
+
+  orders_original = tuple(orders_original[::-1])
+  
   #Get the best logg and temperature for a main sequence star with the given spectral type
   MS = SpectralTypeRelations.MainSequence()
   p_temp = MS.Interpolate(MS.Temperature, p_spt)
@@ -196,8 +190,14 @@ if __name__ == "__main__":
 
   
   if "-" in datafile:
-    idx = int(datafile.split("-")[1].split(".fits")[0])
-    outfilename = "%s-%i.fits" %(datafile.split("-")[0], idx+1)
+    i = 0
+    itemp = 0
+    while i >= 0:
+      i = datafile.find("-", i+1, len(datafile))
+      if i > 0:
+        itemp = i
+    idx = int(datafile[itemp:].split(".fits")[0])
+    outfilename = "%s-%i.fits" %(datafile[:itemp], idx+1)
   else:
     outfilename = "%s-0.fits" %(datafile.split(".fits")[0])
   print "Outputting to %s" %outfilename
@@ -207,23 +207,28 @@ if __name__ == "__main__":
 
   column_list = []
   Modeler = MakeModel.Modeler()
-  for i, original in enumerate(orders_original[2:-1]):
+  for i, original in enumerate(orders_original):
+    """
     #Make a telluric model for this order
     lowfreq, highfreq = 1e7/original.x[-1], 1e7/original.x[0]
-    telluric = Modeler.MakeModel(h2o=50.0, lowfreq=lowfreq, highfreq=highfreq)
+    telluric = Modeler.MakeModel(humidity=50.0, lowfreq=lowfreq, highfreq=highfreq)
     telluric = FittingUtilities.ReduceResolution(telluric, 20000)
     telluric = FittingUtilities.RebinData(telluric, original.x)
+    """
+
+    original.y *= tellurics[i].y
     
     #original = orders_original[i+2]
     original.cont = FittingUtilities.Continuum(original.x, original.y, lowreject=2, highreject=2)
-    model = orders[i+2]
-    pylab.figure(1)
-    pylab.plot(original.x, original.y/original.cont, 'k-')
-    pylab.plot(model.x, model.y/model.cont, 'r-')
-    pylab.plot(telluric.x, telluric.y, 'g-')
-    pylab.figure(2)
-    pylab.plot(original.x, original.y/(original.cont * model.y/model.cont), 'k-')
-    pylab.plot(telluric.x, telluric.y, 'g-')
+    model = orders[i]
+    if 819 > original.x[0] and 819 < original.x[-1]:
+      pylab.figure(1)
+      pylab.plot(original.x, original.y/original.cont, 'k-')
+      pylab.plot(model.x, model.y/model.cont, 'r-')
+      #pylab.plot(telluric.x, telluric.y, 'g-')
+      pylab.figure(2)
+      pylab.plot(original.x, original.y/(original.cont * model.y/model.cont), 'k-')
+      #pylab.plot(telluric.x, telluric.y, 'g-')
     original.y /= model.y/model.cont
     
     columns = {"wavelength": original.x,
@@ -236,5 +241,50 @@ if __name__ == "__main__":
   # Output
   HelperFunctions.OutputFitsFileExtensions(column_list, datafile, outfilename, mode="new")
     
+  #pylab.figure(1)
+  #pylab.savefig("Comparison.pdf")
+  #pylab.figure(2)
+  #pylab.savefig("Corrected.pdf")
   pylab.show()
+
+
+
+if __name__ == "__main__":
+  import os
+  import sys
+  if len(sys.argv) > 1:
+    p_spt="A0"
+    vsini = 15
+    vel = 0.0
+    metal = 0.0
+    fileList = []
+    for arg in sys.argv[1:]:
+      if "primary" in arg:
+	p_spt = arg.split("=")[-1]
+      elif  "vsini" in arg:
+	vsini = float(arg.split("=")[-1])
+      elif "rv" in arg:
+	vel = float(arg.split("=")[-1])
+      elif "metal" in arg:
+	metal = float(arg.split("=")[-1])
+      else:
+	fileList.append(arg)
+    
+    for fname in fileList:
+      main1(fname, p_spt=p_spt, vsini=vsini, vel=vel, metal=metal)
+
+  else:
+    infile = open("par.list")
+    lines = infile.readlines()
+    infile.close()
+    for line in lines:
+      if line.startswith("#"):
+	continue
+
+      fields = line.split()
+      fname = fields[0]
+      p_spt = fields[1]
+      vel = float(fields[2])
+      vsini = float(fields[3])
+      main1(fname, p_spt=p_spt, vsini=vsini, vel=vel, metal=0.0)
 
