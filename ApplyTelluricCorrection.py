@@ -9,6 +9,7 @@ import HelperFunctions
 import numpy
 
 plot = True
+plotorder = 29
 
 def ReadCorrectedFile(fname, yaxis="model"):
   orders = []
@@ -34,9 +35,11 @@ def Correct(original, corrected, offset=None):
   test_orders, header = ReadCorrectedFile(corrected, yaxis="flux")
 
   if plot:
-    for order, model in zip(test_orders, corrected_orders):
-      plt.plot(order.x, order.y/order.cont)
-      plt.plot(model.x, model.y)
+    order = test_orders[plotorder]
+    model = corrected_orders[plotorder]
+    #for order, model in zip(test_orders, corrected_orders):
+    plt.plot(order.x, order.y/order.cont)
+    plt.plot(model.x, model.y)
     plt.title("Correction in corrected file only")
     plt.show()
 
@@ -56,7 +59,7 @@ def Correct(original, corrected, offset=None):
       model = DataStructures.xypoint(x=data.x, y=numpy.ones(data.x.size))
       print "Warning!!! Telluric Model not found for order %i" %i
 
-    if plot:
+    if plot and i == plotorder:
       plt.figure(1)
       plt.plot(data.x, data.y/data.cont)
       plt.plot(model.x, model.y)
@@ -97,7 +100,7 @@ def main1():
     if plot:
       plt.figure(2)
     for i, data in enumerate(corrected_orders):
-      if plot:
+      if plot and i == plotorder:
         plt.plot(data.x, data.y/data.cont)
       #Set up data structures for OutputFitsFile
       columns = {"wavelength": data.x,
@@ -113,43 +116,41 @@ def main1():
 
   else:
     allfiles = os.listdir("./")
-    corrected_files = [f for f in allfiles if "Corrected_" in f and f.endswith("-0.fits")]
+    corrected_files = [f for f in allfiles if "Corrected_" in f and f.endswith("-1.fits")]
     #original_files = [f for f in allfiles if any(f in cf for cf in corrected_files)]
-    hip_files = [f for f in allfiles if (f.startswith("HIP_") or f.startswith("HR_")) and not f.endswith("-0.fits")]
+    #hip_files = [f for f in allfiles if (f.startswith("HIP_") or f.startswith("HR_")) and not f.endswith("-0.fits")]
 
-    for hip in hip_files:
-      if any(["%s-0.fits" %(hip.split(".fits")[0]) in f for f in corrected_files]):
-        original = hip
-        corrected = "Corrected_%s-0.fits" %(hip.split(".fits")[0])
-        print corrected, original
+    #for original, corrected in zip(original_files, corrected_files):
+    for corrected in corrected_files:
+      idx = corrected.index("_")
+      original = corrected[idx+1:].replace("-1.fits", "-0.fits")
+      print original, corrected      
       
-        outfilename = "%s_telluric_corrected.fits" %(original.split(".fits")[0])
-        print "Outputting to %s" %outfilename
+      outfilename = "%s_telluric_corrected.fits" %(original.split(".fits")[0])
+      print "Outputting to %s" %outfilename
+      
+      corrected_orders = Correct(original, corrected, offset=None)
+      
+      column_list = []
+      if plot:
+        plt.figure(2)
+      for i, data in enumerate(corrected_orders):
+        if plot and i == plotorder:
+          plt.plot(data.x, data.y/data.cont)
+        #Set up data structures for OutputFitsFile
+        columns = {"wavelength": data.x,
+                   "flux": data.y,
+                   "continuum": data.cont,
+                   "error": data.err}
+        column_list.append(columns)
+      HelperFunctions.OutputFitsFileExtensions(column_list, original, outfilename, mode="new")
 
-        corrected_orders = Correct(original, corrected, offset=None)
+      if plot:
+        plt.title(original)
+        plt.xlabel("Wavelength (nm)")
+        plt.ylabel("Flux")
+        plt.show()
 
-        column_list = []
-        if plot:
-          plt.figure(2)
-        for i, data in enumerate(corrected_orders):
-          if plot:
-            plt.plot(data.x, data.y/data.cont)
-          #Set up data structures for OutputFitsFile
-          columns = {"wavelength": data.x,
-                     "flux": data.y,
-                     "continuum": data.cont,
-                     "error": data.err}
-          column_list.append(columns)
-        HelperFunctions.OutputFitsFileExtensions(column_list, original, outfilename, mode="new")
-
-        if plot:
-          plt.title(original)
-          plt.xlabel("Wavelength (nm)")
-          plt.ylabel("Flux")
-          plt.show()
-
-      else:
-        print "No Correction file found for file %s" %hip
 
 
 

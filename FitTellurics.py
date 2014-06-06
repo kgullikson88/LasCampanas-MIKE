@@ -229,7 +229,7 @@ if __name__ == "__main__":
     fitter.shift = 0.0
     for i, order in enumerate(orders):
       if i == start:
-	model = fitmodel
+        model = fitmodel
       else:
         fitter.AdjustValue({"wavestart": order.x[0] - 20.0,
                             "waveend": order.x[-1] + 20.0,

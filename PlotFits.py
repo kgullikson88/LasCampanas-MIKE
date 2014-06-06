@@ -5,6 +5,25 @@ import HelperFunctions
 import FittingUtilities
 import numpy
 
+def ReadFits(fitsfile, lower=812, upper=828):
+  import DataStructures
+  from astropy.io import fits
+  hdulist = pyfits.open(fitsfile)
+  print hdulist[0].header['object']
+  data = hdulist[1].data
+  x = data['wave'][0]/10.0
+  y = data['flux_reduced'][0]
+  err = data['err_reduced'][0]
+  left = numpy.searchsorted(x, lower)
+  right = numpy.searchsorted(x, upper)
+  data = DataStructures.xypoint(x=x[left:right],
+                                y=y[left:right],
+                                err=err[left:right])
+  data.cont = FittingUtilities.Continuum(data.x, data.y, fitorder=4, lowreject=1.5)
+  #pylab.plot(data.x, data.y)
+  #pylab.plot(data.x, data.cont)
+  #pylab.show()
+  return [data,]
 
 if __name__ == "__main__":
   fileList = []
@@ -13,6 +32,7 @@ if __name__ == "__main__":
   byorder = False   #Plots one order at a time
   pixelscale = False
   oneplot = False
+  filetype = "Mine"
   for arg in sys.argv[1:]:
     if "tellcorr" in arg:
       tellurics = True
@@ -25,6 +45,8 @@ if __name__ == "__main__":
       #byorder = True
     elif "-one" in arg:
       oneplot = True
+    elif "-type" in arg:
+      filetype = "Native"
     else:
       fileList.append(arg)
 
@@ -32,7 +54,10 @@ if __name__ == "__main__":
 
   for fnum, fname in enumerate(fileList):
     ls = linestyles[fnum%len(linestyles)]
-    orders = HelperFunctions.ReadFits(fname, extensions=True, x="wavelength", y="flux", cont="continuum", errors="error")
+    if filetype == "Mine":
+      orders = HelperFunctions.ReadFits(fname, extensions=True, x="wavelength", y="flux", cont="continuum", errors="error")
+    else:
+      orders = ReadFits(fname)
     print fname, len(orders)
     if not oneplot:
       plt.figure(fnum)
@@ -40,7 +65,6 @@ if __name__ == "__main__":
     if tellurics:
       model = HelperFunctions.ReadFits(fname, extensions=True, x="wavelength", y="model")
     for i, order in enumerate(orders):
-      
       #order.cont = FittingUtilities.Continuum(order.x, order.y, lowreject=3, highreject=3)
       if pixelscale:
         order.x = numpy.arange(order.size())
